@@ -2,6 +2,12 @@
 
 End-to-end credit scoring pipeline framed as a profit-optimization problem. Built using XGBoost and Logistic Regression on Lending Club loan data, this project demonstrates how machine learning translates directly into business decisions by tuning classification thresholds to maximize Expected Value per loan rather than pure accuracy.
 
+## Dashboard
+
+![Credit Risk Analytics Dashboard](docs/dashboard.png)
+
+*Interactive version: `docs/dashboard.html` | Clean data for Power BI: `docs/data/`*
+
 ## Overview
 
 The project balances the trade-off between approving bad loans (loss) and rejecting good ones (opportunity cost). Instead of optimizing accuracy or AUC alone, the model maximizes **Expected Value (EV) per loan** based on actual business parameters derived from historical payment data.
@@ -45,8 +51,12 @@ credit-risk-analytics/
 ├── notebooks/
 │   └── credit_risk_pipeline.ipynb    # Full pipeline with outputs
 ├── src/
-│   └── credit_risk_pipeline.py       # Production-ready Python script
-├── docs/                              # Documentation
+│   ├── credit_risk_pipeline.py       # Production-ready Python script
+│   └── create_dashboard.py           # Dashboard generator (Plotly)
+├── docs/
+│   ├── dashboard.png                 # Static dashboard image
+│   ├── dashboard.html                # Interactive dashboard
+│   └── data/                         # Clean data exports for Power BI
 ├── requirements.txt                   # Python dependencies
 └── README.md
 ```

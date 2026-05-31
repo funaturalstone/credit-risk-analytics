@@ -1,0 +1,9 @@
+Feature,SHAP_Importance
+Interest Rate,0.285
+Debt-to-Income Ratio,0.198
+FICO Range,0.156
+Revolving Utilization,0.122
+Annual Income,0.095
+Loan Amount,0.068
+Term (60m vs 36m),0.045
+Employment Length,0.031

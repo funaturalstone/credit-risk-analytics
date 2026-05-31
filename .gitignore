@@ -6,8 +6,9 @@
 *.h5
 *.joblib
 
-# Allow small sample data
+# Allow small sample data and dashboard data
 !data/sample/*.csv
+!docs/data/*.csv
 
 # Output files
 outputs/

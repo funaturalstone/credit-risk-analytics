@@ -1,0 +1,6 @@
+Strategy,EV_per_Loan,Threshold
+XGBoost (Optimized),2538.6,0.2021
+Logistic Regression,2537.24,0.0937
+Reject All,2408.8,
+FICO < 670 Rule,789.19,
+Approve All,85.8,

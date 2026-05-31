@@ -1,0 +1,2 @@
+Model,Test_AUC,Optimal_Threshold,EV_per_Loan_USD,Total_EV_USD,True_Negatives,False_Positives,False_Negatives,True_Positives
+XGBoost,0.7085,0.2021,2539.6,40603060,1988,10832,93,3075
