@@ -87,6 +87,7 @@ pip install -r requirements.txt
 # model
 jupyter notebook notebooks/credit_risk_pipeline.ipynb   # or: python src/credit_risk_pipeline.py data/lending_club_80k.csv
 python src/create_dashboard.py                          # rebuilds docs/dashboard.* from docs/data/
+python src/create_dashboard_v2.py                       # second layout, also uses data/lending_club.db (run sql/load_data.py first)
 
 # SQL
 python sql/load_data.py data/lending_club_80k.csv
@@ -101,6 +102,7 @@ The last cell of the notebook saves its results to `docs/data/`, which the dashb
 notebooks/credit_risk_pipeline.ipynb   full pipeline with outputs
 src/credit_risk_pipeline.py            same pipeline as a script
 src/create_dashboard.py                dashboard built from docs/data/
+src/create_dashboard_v2.py             second dashboard layout (docs/dashboard_v2.*)
 sql/load_data.py, sql/analysis.sql     SQL analysis
 docs/                                  dashboard image, HTML and result CSVs
 ```
