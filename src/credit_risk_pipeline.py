@@ -128,11 +128,13 @@ def step1_load_and_prepare(filepath: str) -> Tuple[pd.DataFrame, Dict[str, float
     business parameters from the actual data.
 
     Business params:
-        total_payment = installment × term_months
-        PROFIT_TN     = median(total_payment - loan_amnt)   # interest earned on good loan
-        LOSS_FN       = median(loan_amnt)                    # principal lost on undetected default
-        COST_FP       = median(total_payment - loan_amnt)    # opportunity cost of rejecting good loan
-        REWARD_TP     = median(loan_amnt)                    # principal saved by catching default
+        Every outcome is measured against not lending at all (= 0):
+        PROFIT_TN = median(total_pymnt - loan_amnt) over repaid loans    # interest earned
+        LOSS_FN   = median(loan_amnt - total_pymnt) over defaulted loans # net principal lost
+        COST_FP   = 0   # rejecting a good loan earns nothing and loses nothing
+        REWARD_TP = 0   # rejecting a bad loan earns nothing and loses nothing
+        (An earlier version also counted the principal saved as a gain, which
+        double-counted LOSS_FN and made "reject everyone" look profitable.)
     """
     log.info("Loading dataset from %s", filepath)
     df = pd.read_csv(filepath)
@@ -148,7 +150,7 @@ def step1_load_and_prepare(filepath: str) -> Tuple[pd.DataFrame, Dict[str, float
 
     # Select features
     all_features = NUMERIC_FEATURES + CATEGORICAL_FEATURES + ORDINAL_FEATURES
-    keep_cols = all_features + ["target", "loan_status", "loan_amnt", "installment"]
+    keep_cols = list(dict.fromkeys(all_features + ["target", "loan_status", "loan_amnt", "installment", "total_pymnt"]))  # no duplicate columns
     # loan_amnt & installment already in NUMERIC_FEATURES, but keep loan_status for audit
     df = df[[c for c in keep_cols if c in df.columns]].copy()
 
@@ -165,22 +167,24 @@ def step1_load_and_prepare(filepath: str) -> Tuple[pd.DataFrame, Dict[str, float
     log.info("Dropped %d rows with NaN → remaining %d", before - len(df), len(df))
 
     # ---- Business parameters (computed from actual data) ----
-    term_months = df["term"].map({0: 36, 1: 60})
-    total_payment = df["installment"] * term_months
-    interest_earned = total_payment - df["loan_amnt"]
+    if "total_pymnt" in df.columns:
+        total_payment = df["total_pymnt"]
+    else:
+        total_payment = df["installment"] * df["term"].map({0: 36, 1: 60})
+    good, bad = df["target"] == 0, df["target"] == 1
 
     business_params = {
-        "PROFIT_TN":  float(interest_earned.median()),   # profit from approving a good loan
-        "LOSS_FN":    float(df["loan_amnt"].median()),    # loss from approving a bad loan
-        "COST_FP":    float(interest_earned.median()),    # opportunity cost of rejecting a good loan
-        "REWARD_TP":  float(df["loan_amnt"].median()),    # savings from rejecting a bad loan
+        "PROFIT_TN":  float((total_payment[good] - df.loc[good, "loan_amnt"]).median()),  # interest earned on a repaid loan
+        "LOSS_FN":    float((df.loc[bad, "loan_amnt"] - total_payment[bad]).median()),    # net loss on a defaulted loan
+        "COST_FP":    0.0,  # rejecting a good loan: no cash in or out
+        "REWARD_TP":  0.0,  # rejecting a bad loan: no cash in or out
     }
     log.info("Business parameters (median-based):")
     for k, v in business_params.items():
         log.info("  %s = $%.2f", k, v)
 
     # Drop helper column
-    df.drop(columns=["loan_status"], inplace=True, errors="ignore")
+    df.drop(columns=["loan_status", "total_pymnt"], inplace=True, errors="ignore")
 
     return df, business_params
 
@@ -434,7 +438,7 @@ def step6_tune_threshold(
             "val_proba": proba,
         }
 
-        log.info("  %s — Best threshold: %.4f | Val EV: $%,.2f | EV/loan: $%.2f",
+        log.info("  %s — Best threshold: %.4f | Val EV: $%.2f | EV/loan: $%.2f",
                  name.upper(), best_threshold, best_ev, best_ev / len(y_val))
 
     # ---- Plot EV vs Threshold ----
@@ -677,9 +681,7 @@ def step11_shap(
     # Waterfall for top N individuals
     explanation = shap.Explanation(
         values=shap_values[:n_explain],
-        base_values=explainer.expected_value
-        if isinstance(explainer.expected_value, float)
-        else explainer.expected_value[POSITIVE_CLASS],
+        base_values=float(np.ravel(explainer.expected_value)[-1]),  # scalar for a binary XGBoost model
         data=X_val_xgb[:n_explain],
         feature_names=feature_names,
     )
@@ -861,7 +863,7 @@ def step14_final_test(
         tn, fp, fn, tp = confusion_matrix(y_test.values, y_pred).ravel()
 
         log.info("\n--- %s (threshold=%.4f) ---", name.upper(), t_opt)
-        log.info("  Test EV:      $%,.2f", ev)
+        log.info("  Test EV:      $%.2f", ev)
         log.info("  Test EV/loan: $%.2f", ev / len(y_test))
         log.info("  Test AUC:     %.4f", auc)
         log.info("  TN=%d  FP=%d  FN=%d  TP=%d", tn, fp, fn, tp)

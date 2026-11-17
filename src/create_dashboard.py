@@ -7,7 +7,7 @@ business value, and feature importance for stakeholder review.
 Outputs:
 - docs/dashboard.png  (static image for resume/README)
 - docs/dashboard.html (interactive version)
-- docs/dashboard_data.csv (clean data ready for Power BI Desktop import)
+Reads the results that the notebook saves in docs/data/.
 """
 
 import os
@@ -16,50 +16,36 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # ═══════════════════════════════════════════════════════════════
-#  ACTUAL RESULTS FROM PROJECT (from notebook outputs)
+#  RESULTS — read from docs/data/, written by the last cell of
+#  notebooks/credit_risk_pipeline.ipynb (run the notebook first)
 # ═══════════════════════════════════════════════════════════════
+import numpy as np
 
-# Model comparison on validation set
-model_comparison = pd.DataFrame({
-    "Strategy": ["XGBoost (Optimized)", "Logistic Regression", "Reject All",
-                 "FICO < 670 Rule", "Approve All"],
-    "EV_per_Loan": [2538.60, 2537.24, 2408.80, 789.19, 85.80],
-    "Threshold": [0.2021, 0.0937, None, None, None],
-})
+DATA = "docs/data"
+model_comparison = pd.read_csv(f"{DATA}/model_comparison.csv")
+business_params = pd.read_csv(f"{DATA}/business_parameters.csv")
+feature_importance = pd.read_csv(f"{DATA}/feature_importance.csv")
+curve = pd.read_csv(f"{DATA}/ev_threshold_curve.csv")
+test_df = pd.read_csv(f"{DATA}/test_results_summary.csv")
 
-# Test set results (XGBoost - winner)
+thresholds = curve["Threshold"].to_numpy()
+ev_curve_xgb = curve["EV_XGBoost"].to_numpy()
+ev_curve_lr = curve["EV_LogisticRegression"].to_numpy()
+best_xgb, best_lr = int(ev_curve_xgb.argmax()), int(ev_curve_lr.argmax())
+
+xgb_row = test_df[test_df["Model"] == "XGB"].iloc[0]
 test_results = {
     "Model": "XGBoost",
-    "AUC": 0.7085,
-    "Threshold": 0.2021,
-    "EV_per_Loan": 2539.60,
-    "Total_EV": 40603060,
-    "TN": 1988, "FP": 10832, "FN": 93, "TP": 3075,
+    "AUC": float(xgb_row["AUC"]),
+    "Threshold": float(xgb_row["Threshold"]),
+    "EV_per_Loan": float(xgb_row["EV/Loan ($)"]),
+    "Total_EV": float(xgb_row["Test EV ($)"]),
+    "Approval_Rate": float(xgb_row["Approval_Rate"]),
+    "TN": int(xgb_row["TN"]), "FP": int(xgb_row["FP"]),
+    "FN": int(xgb_row["FN"]), "TP": int(xgb_row["TP"]),
 }
-
-# Business parameters (from actual payment data)
-business_params = pd.DataFrame({
-    "Parameter": ["Profit per Repaid Loan (TN)", "Loss per Defaulted Loan (FN)",
-                  "Opportunity Cost (FP)", "Interest Reward (TP)"],
-    "Value_USD": [1518.50, 5711.90, 455.55, 14000.00],
-})
-
-# Top features from SHAP analysis (typical for Lending Club)
-feature_importance = pd.DataFrame({
-    "Feature": ["Interest Rate", "Debt-to-Income Ratio", "FICO Range",
-                "Revolving Utilization", "Annual Income", "Loan Amount",
-                "Term (60m vs 36m)", "Employment Length"],
-    "SHAP_Importance": [0.285, 0.198, 0.156, 0.122, 0.095, 0.068, 0.045, 0.031],
-})
-
-# EV vs Threshold curve (simulated to match actual optimal point)
-import numpy as np
-thresholds = np.linspace(0.05, 0.95, 50)
-# Realistic EV curve shape: peaks near 0.20 (the optimal)
-ev_curve_xgb = 2540 * np.exp(-((thresholds - 0.20) ** 2) / 0.08) - 200
-ev_curve_lr = 2537 * np.exp(-((thresholds - 0.09) ** 2) / 0.06) - 300
-ev_curve_xgb = np.maximum(ev_curve_xgb, 50)
-ev_curve_lr = np.maximum(ev_curve_lr, 50)
+approve_all_ev = float(model_comparison.loc[model_comparison["Strategy"] == "Approve All", "EV_per_Loan"].iloc[0])
+model_val_ev = float(model_comparison["EV_per_Loan"].max())
 
 # Dataset summary
 dataset_summary = {
@@ -143,11 +129,11 @@ kpi_configs = [
         "subtitle": f"Total: ${test_results['Total_EV']/1e6:.1f}M",
     },
     {
-        "title": "vs FICO Rule",
-        "value": 222,
+        "title": "Approval Rate",
+        "value": test_results["Approval_Rate"] * 100,
         "suffix": "%",
         "color": COLORS["warning"],
-        "subtitle": "3.2x improvement",
+        "subtitle": f"Approve-all baseline: ${approve_all_ev:,.0f}/loan",
     },
 ]
 
@@ -259,29 +245,29 @@ fig.add_trace(
 # Optimal threshold markers
 fig.add_trace(
     go.Scatter(
-        x=[0.2021], y=[2538.60],
+        x=[thresholds[best_xgb]], y=[ev_curve_xgb[best_xgb]],
         mode="markers+text",
         marker={"size": 14, "color": COLORS["success"],
                 "line": {"width": 2, "color": "white"}},
-        text=["XGB Optimal: 0.20"],
+        text=[f"XGB Optimal: {thresholds[best_xgb]:.2f}"],
         textposition="top right",
         textfont={"size": 11, "color": COLORS["success"], "family": "Segoe UI"},
         showlegend=False,
-        hovertemplate="XGBoost Optimal<br>Threshold: 0.20<br>EV: $2,539<extra></extra>",
+        hovertemplate=f"XGBoost Optimal<br>Threshold: {thresholds[best_xgb]:.2f}<br>EV: ${ev_curve_xgb[best_xgb]:,.0f}<extra></extra>",
     ),
     row=3, col=1,
 )
 fig.add_trace(
     go.Scatter(
-        x=[0.0937], y=[2537.24],
+        x=[thresholds[best_lr]], y=[ev_curve_lr[best_lr]],
         mode="markers+text",
         marker={"size": 14, "color": COLORS["primary"],
                 "line": {"width": 2, "color": "white"}},
-        text=["LR Optimal: 0.09"],
+        text=[f"LR Optimal: {thresholds[best_lr]:.2f}"],
         textposition="bottom left",
         textfont={"size": 11, "color": COLORS["primary"], "family": "Segoe UI"},
         showlegend=False,
-        hovertemplate="LR Optimal<br>Threshold: 0.09<br>EV: $2,537<extra></extra>",
+        hovertemplate=f"LR Optimal<br>Threshold: {thresholds[best_lr]:.2f}<br>EV: ${ev_curve_lr[best_lr]:,.0f}<extra></extra>",
     ),
     row=3, col=1,
 )
@@ -392,45 +378,18 @@ for annotation in fig["layout"]["annotations"]:
 
 os.makedirs("docs", exist_ok=True)
 
-# Static PNG (for resume / README)
-fig.write_image("docs/dashboard.png", width=1800, height=1400, scale=2)
-print("[OK] Saved: docs/dashboard.png")
-
 # Interactive HTML (for in-browser viewing)
 fig.write_html("docs/dashboard.html", include_plotlyjs="cdn")
 print("[OK] Saved: docs/dashboard.html")
 
-# Clean data CSV (for Power BI Desktop import)
-combined_data = {
-    "model_comparison.csv": model_comparison,
-    "business_parameters.csv": business_params,
-    "feature_importance.csv": feature_importance,
-    "ev_threshold_curve.csv": pd.DataFrame({
-        "Threshold": thresholds,
-        "EV_XGBoost": ev_curve_xgb,
-        "EV_LogisticRegression": ev_curve_lr,
-    }),
-}
+# Static PNG (for the README); needs the kaleido package
+try:
+    fig.write_image("docs/dashboard.png", width=1800, height=1400, scale=2)
+    print("[OK] Saved: docs/dashboard.png")
+except Exception as e:
+    print(f"[SKIP] PNG not saved ({type(e).__name__}). Install kaleido or screenshot docs/dashboard.html.")
 
-os.makedirs("docs/data", exist_ok=True)
-for filename, df in combined_data.items():
-    df.to_csv(f"docs/data/{filename}", index=False)
-    print(f"[OK] Saved: docs/data/{filename}")
-
-# Test results summary CSV
-test_summary = pd.DataFrame([{
-    "Model": test_results["Model"],
-    "Test_AUC": test_results["AUC"],
-    "Optimal_Threshold": test_results["Threshold"],
-    "EV_per_Loan_USD": test_results["EV_per_Loan"],
-    "Total_EV_USD": test_results["Total_EV"],
-    "True_Negatives": test_results["TN"],
-    "False_Positives": test_results["FP"],
-    "False_Negatives": test_results["FN"],
-    "True_Positives": test_results["TP"],
-}])
-test_summary.to_csv("docs/data/test_results_summary.csv", index=False)
-print("[OK] Saved: docs/data/test_results_summary.csv")
+# The CSVs in docs/data/ come from the notebook and can be imported into Power BI as they are.
 
 print("\nDashboard generation complete!")
 print("View interactively: open docs/dashboard.html")

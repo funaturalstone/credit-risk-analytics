@@ -1,90 +1,108 @@
-# Credit Risk Analytics — Lending Club Loan Portfolio
+# Credit Risk Analytics: Lending Club
 
-End-to-end credit scoring pipeline framed as a profit-optimization problem. Built using XGBoost and Logistic Regression on Lending Club loan data, this project demonstrates how machine learning translates directly into business decisions by tuning classification thresholds to maximize Expected Value per loan rather than pure accuracy.
+A credit scoring model that decides which loans to approve, tuned on expected profit per loan rather than accuracy, plus a SQL analysis of the same loan book. Individual project, April 2026.
 
-## Dashboard
+![Dashboard](docs/dashboard.png)
 
-![Credit Risk Analytics Dashboard](docs/dashboard.png)
+## Problem
 
-*Interactive version: `docs/dashboard.html` | Clean data for Power BI: `docs/data/`*
+A lender loses much more on a loan that defaults than it earns on a loan that is repaid. A model with high accuracy can still lose money if it gets the expensive cases wrong. So the question here is not "how accurate is the model" but "which approval rule makes the most money per loan".
 
-## Overview
+## Data
 
-The project balances the trade-off between approving bad loans (loss) and rejecting good ones (opportunity cost). Instead of optimizing accuracy or AUC alone, the model maximizes **Expected Value (EV) per loan** based on actual business parameters derived from historical payment data.
+- Lending Club loans, 80,000 rows, 19.8% of them charged off (defaulted)
+- Only finished loans are used: Fully Paid or Charged Off
+- Profit and loss come from the data itself (`docs/data/business_parameters.csv`):
+  - a repaid loan earns a median of **$1,519** in interest
+  - a defaulted loan loses a median of **$5,712** after what the borrower paid back
 
-## Key Results
+The raw dataset is not in this repo. Put the CSV at `data/lending_club_80k.csv` (see How to run).
 
-| Metric | Value |
+## Method
+
+1. **Cleaning:** median imputation for missing values plus a flag column for missing employment length.
+2. **Split:** 60% train, 20% validation, 20% test, stratified so each set keeps the same default rate.
+3. **Preprocessing:** scaling for numeric columns, one-hot encoding for categories, ordinal encoding for term and employment length.
+4. **Models:** Logistic Regression and XGBoost with class weighting for the imbalance.
+5. **Expected value:** every decision is measured against not lending at all, which is worth 0.
+   Approving a good loan earns the interest, approving a bad loan loses the net loss, and rejecting either one is 0.
+6. **Threshold:** 200 cut-off points tried on the validation set; the one with the highest expected value per loan is kept.
+7. **Baselines:** approve everything, reject everything and a simple rule that rejects FICO below 670.
+8. **Checks:** 5-fold cross-validation, a stress test with higher default rates, and SHAP to explain the model.
+9. **Test:** one final run on the untouched test set.
+
+## Results
+
+Expected profit per loan on the validation set:
+
+| Strategy | EV per loan |
 |---|---|
-| Dataset | Lending Club — 80,000 loans (19.8% default rate) |
-| Train / Val / Test Split | 60% / 20% / 20% |
-| Best Model | XGBoost |
-| Test AUC | 0.71 |
-| Optimal Threshold | 0.20 |
-| Expected Value per Loan | $2,540 |
-| Improvement vs FICO Baseline | +222% (3.2x) |
+| XGBoost (threshold 0.54) | **$411** |
+| Logistic Regression (threshold 0.21) | $405 |
+| Reject if FICO below 670 | $169 |
+| Approve everything | $86 |
+| Reject everything | $0 |
 
-## Tech Stack
+On the held-out test set:
 
-- **Language:** Python 3.10+
-- **Core Libraries:** Pandas, NumPy, Scikit-learn, XGBoost
-- **Explainability:** SHAP
-- **Visualization:** Matplotlib, Power BI
+| Strategy | AUC | EV per loan | Loans approved |
+|---|---|---|---|
+| XGBoost | 0.708 | **$397** | 67% |
+| Logistic Regression | 0.711 | $406 | 63% |
+| Reject if FICO below 670 | | $155 | 82% |
+| Approve everything | | $86 | 100% |
 
-## Methodology
+- Using the model to choose which loans to approve earns about **4.6 times** more per loan than approving everyone and **2.6 times** more than the FICO rule on the test set.
+- XGBoost and Logistic Regression end up almost the same (5-fold CV: $394 vs $398 per loan, AUC 0.707 for both). The simpler model is just as good here, which also makes it easier to explain to a credit committee.
+- The strongest drivers of default (mean |SHAP|) are **interest rate, loan term (60 vs 36 months) and FICO score**, followed by number of mortgage accounts and debt-to-income.
+- Stress test: with the same threshold, the portfolio stays profitable until the default rate rises from 19.8% to roughly 28%, after which it starts losing money.
 
-1. **Data Preparation** — Filter loan status (Fully Paid vs Charged Off), handle missing values with median imputation, create missing-flag features
-2. **Business Parameters** — Derive actual profit/loss values from historical payment data (PROFIT_TN, LOSS_FN, COST_FP, REWARD_TP)
-3. **Train / Val / Test Split** — Stratified 60/20/20 split to preserve default rate across sets
-4. **Preprocessing** — StandardScaler for numerics, OneHotEncoder for categoricals, Ordinal encoding for term and employment length
-5. **Model Training** — Logistic Regression (baseline) and XGBoost (with scale_pos_weight for class imbalance)
-6. **Threshold Tuning** — Sweep 200 candidate thresholds on validation set, pick the one that maximizes EV
-7. **Baseline Comparison** — Approve All, Reject All, FICO-based rule
-8. **Final Evaluation** — One-time evaluation on held-out test set
-9. **Interpretation** — SHAP analysis for feature importance and individual prediction explanations
-10. **Dashboard** — Power BI dashboard summarizing model performance, EV curves, and feature importance for stakeholder review
+**Correction:** the first version of this project counted the principal saved by rejecting a bad loan as a gain, on top of the loss already counted for approving it. That double counting made "reject everything" look almost as profitable as the model ($2,409 vs $2,539 per loan). The numbers above use the corrected definition.
 
-## Project Structure
+## SQL analysis
+
+`sql/analysis.sql` answers eight questions about the loan book in SQLite, from simple `GROUP BY` queries to window functions and CTEs. Some of the findings:
+
+- Default rate climbs from 5.9% in grade A to 47.4% in grade G, and 60-month loans default twice as often as 36-month loans (32.4% vs 15.8%).
+- Debt consolidation accounts for $71.4M of the $114.5M lost on defaulted loans.
+- Expected value of lending to each grade, using the same definition as the model:
+
+| Grade | Loans | Default rate | EV per loan | Decision |
+|---|---|---|---|---|
+| A | 14,067 | 5.9% | $765 | lend |
+| B | 23,265 | 13.3% | $707 | lend |
+| C | 22,580 | 22.1% | $418 | lend |
+| D | 12,075 | 30.3% | $122 | lend |
+| E | 5,521 | 38.3% | -$233 | do not lend |
+| F | 1,958 | 46.2% | -$846 | do not lend |
+| G | 534 | 47.4% | -$1,000 | do not lend |
+
+Grades E to G are 10% of the loans and lose money on average, even though they pay the highest interest rates.
+
+## How to run
+
+```sh
+pip install -r requirements.txt
+
+# model
+jupyter notebook notebooks/credit_risk_pipeline.ipynb   # or: python src/credit_risk_pipeline.py data/lending_club_80k.csv
+python src/create_dashboard.py                          # rebuilds docs/dashboard.* from docs/data/
+
+# SQL
+python sql/load_data.py data/lending_club_80k.csv
+sqlite3 -header -column data/lending_club.db < sql/analysis.sql
+```
+
+The last cell of the notebook saves its results to `docs/data/`, which the dashboard script and Power BI read. The numbers in this README come from the notebook. The script is a shorter version that drops rows with missing values instead of filling them, so its results are slightly different (test EV about $385 to $396 per loan, AUC 0.70 to 0.71).
+
+## Repo contents
 
 ```
-credit-risk-analytics/
-├── notebooks/
-│   └── credit_risk_pipeline.ipynb    # Full pipeline with outputs
-├── src/
-│   ├── credit_risk_pipeline.py       # Production-ready Python script
-│   └── create_dashboard.py           # Dashboard generator (Plotly)
-├── docs/
-│   ├── dashboard.png                 # Static dashboard image
-│   ├── dashboard.html                # Interactive dashboard
-│   └── data/                         # Clean data exports for Power BI
-├── requirements.txt                   # Python dependencies
-└── README.md
+notebooks/credit_risk_pipeline.ipynb   full pipeline with outputs
+src/credit_risk_pipeline.py            same pipeline as a script
+src/create_dashboard.py                dashboard built from docs/data/
+sql/load_data.py, sql/analysis.sql     SQL analysis
+docs/                                  dashboard image, HTML and result CSVs
 ```
 
-## How to Run
-
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Download the Lending Club dataset (80k-row version) and place at the path specified in the notebook.
-
-3. Run the notebook or script:
-   ```bash
-   jupyter notebook notebooks/credit_risk_pipeline.ipynb
-   # or
-   python src/credit_risk_pipeline.py
-   ```
-
-## Key Insights
-
-- **XGBoost outperformed simple FICO-based rules by 222%** in expected profitability, demonstrating clear business value of ML-driven credit decisions
-- **Optimal threshold (0.20) is significantly lower than default (0.50)** because false negatives (funding bad loans) cost ~3.8x more than the profit from true negatives
-- **Top default drivers** identified via SHAP include interest rate, debt-to-income ratio, and FICO score range
-
-## Author
-
-**Tanakit Tuadpitak**
-Bachelor of Science in Digital Transformation and Innovation
-Thammasat University, Thailand
+Tanakit Tuadpitak, Bachelor of Science in Digital Transformation and Innovation, Thammasat University

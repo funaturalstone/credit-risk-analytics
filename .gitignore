@@ -50,3 +50,6 @@ ENV/
 # Logs
 *.log
 logs/
+
+# Local SQLite database built by sql/load_data.py
+*.db
